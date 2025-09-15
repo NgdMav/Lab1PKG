@@ -1,19 +1,33 @@
-# models.py
 from typing import Tuple, List
-import colorsys
-import math
-
-# Все rgb внутри функций использует нормализованные значения в диапазоне [0.0, 1.0]
-# RGB (UI) отображается/вводится в диапазоне 0..255
-# HLS: H in degrees 0..360, L,S in percent 0..100
-# CMYK: channels in percent 0..100
 
 # ----------------- RGB <-> HLS -----------------
 def srgb_to_hls(rgb: Tuple[float, float, float]) -> Tuple[float, float, float]:
     """rgb: normalized [0..1] -> (H°, L%, S%)"""
     r, g, b = rgb
-    h, l, s = colorsys.rgb_to_hls(r, g, b)  # colorsys: H 0..1, L 0..1, S 0..1
-    return (h * 360.0, l * 100.0, s * 100.0)
+    maxc = max(r, g, b)
+    minc = min(r, g, b)
+    l = (maxc + minc) / 2.0
+
+    if maxc == minc:
+        s = 0.0
+        h = 0.0
+    else:
+        diff = maxc - minc
+        if l <= 0.5:
+            s = diff / (maxc + minc)
+        else:
+            s = diff / (2.0 - maxc - minc)
+
+        if maxc == r:
+            h = (g - b) / diff
+        elif maxc == g:
+            h = 2.0 + (b - r) / diff
+        else:
+            h = 4.0 + (r - g) / diff
+        h = (h * 60.0) % 360.0
+
+    return (h, l * 100.0, s * 100.0)
+
 
 def hls_to_srgb(hls: Tuple[float, float, float]) -> Tuple[float, float, float]:
     """(H°, L%, S%) -> normalized rgb [0..1]"""
@@ -21,14 +35,40 @@ def hls_to_srgb(hls: Tuple[float, float, float]) -> Tuple[float, float, float]:
     h = (h_deg % 360.0) / 360.0
     l = max(0.0, min(100.0, l_pct)) / 100.0
     s = max(0.0, min(100.0, s_pct)) / 100.0
-    r, g, b = colorsys.hls_to_rgb(h, l, s)
+
+    if s == 0.0:
+        return (l, l, l)
+
+    if l <= 0.5:
+        m2 = l * (1.0 + s)
+    else:
+        m2 = l + s - l * s
+    m1 = 2.0 * l - m2
+
+    def hue_to_rgb(m1, m2, h):
+        if h < 0:
+            h += 1
+        if h > 1:
+            h -= 1
+        if h < 1/6:
+            return m1 + (m2 - m1) * 6 * h
+        if h < 1/2:
+            return m2
+        if h < 2/3:
+            return m1 + (m2 - m1) * (2/3 - h) * 6
+        return m1
+
+    r = hue_to_rgb(m1, m2, h + 1/3)
+    g = hue_to_rgb(m1, m2, h)
+    b = hue_to_rgb(m1, m2, h - 1/3)
+
     return (r, g, b)
+
 
 # ----------------- RGB <-> CMYK -----------------
 def srgb_to_cmyk(rgb: Tuple[float, float, float]) -> Tuple[float, float, float, float]:
     """rgb normalized -> (C%, M%, Y%, K%)"""
     r, g, b = rgb
-    # Protect against tiny floating errors
     r = max(0.0, min(1.0, r))
     g = max(0.0, min(1.0, g))
     b = max(0.0, min(1.0, b))
@@ -51,7 +91,6 @@ def cmyk_to_srgb(cmyk: Tuple[float, float, float, float]) -> Tuple[float, float,
     r = (1.0 - c) * (1.0 - k)
     g = (1.0 - m) * (1.0 - k)
     b = (1.0 - y) * (1.0 - k)
-    # clamp just in case
     return (max(0.0, min(1.0, r)), max(0.0, min(1.0, g)), max(0.0, min(1.0, b)))
 
 # ----------------- HEX utilities -----------------
@@ -120,7 +159,6 @@ def convert_to_srgb(panel_name: str, values: List[float]) -> Tuple[Tuple[float, 
         b = max(0, min(255, int(round(values[2])))) / 255.0
         return ((r, g, b), clipped)
     elif panel_name == "CMYK":
-        # values: C, M, Y, K percent
         c = values[0]
         m = values[1]
         y = values[2]
@@ -128,12 +166,10 @@ def convert_to_srgb(panel_name: str, values: List[float]) -> Tuple[Tuple[float, 
         rgb = cmyk_to_srgb((c, m, y, k))
         return (rgb, clipped)
     elif panel_name == "HLS":
-        # values: H°, L%, S%
         h = values[0]
         l = values[1]
         s = values[2]
         rgb = hls_to_srgb((h, l, s))
-        # hls_to_srgb returns normalized; theoretically in-range, but clamp
         r, g, b = rgb
         cr, cg, cb = clamp01(r), clamp01(g), clamp01(b)
         if (cr != r) or (cg != g) or (cb != b):
