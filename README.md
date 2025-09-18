@@ -16,3 +16,8 @@ python -m venv .venv
 
 pip install -r requirements.txt
 python main.py
+
+
+### Запуск на Windows
+
+.exe находиться в папке ### DIST
